@@ -1,36 +1,35 @@
-const https = require('https');
+const axios = require('axios');
 
 /**
- * @param {https.RequestOptions} options HTTPS Request options
+ * @param {object} options Axios request options
  * @param {boolean} [raw] Get raw or JSON data
  * @param {string} [content] Request body content
  * @returns {Promise<{ data: (string | object | array), cookies: string[] }>} Result
  */
 function request(options = {}, raw = false, content = '') {
-  return new Promise((cb, err) => {
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (c) => { data += c; });
-      res.on('end', () => {
-        if (raw) {
-          cb({ data, cookies: res.headers['set-cookie'] });
-          return;
-        }
+  if (!options.url && (options.hostname || options.host) )
+  {
+    options.url = 
+      options.port==443 ? "https://" : "http://"+
+      (options.hostname || options.host)+
+      options.path || "/";
+  }
 
-        try {
-          data = JSON.parse(data);
-        } catch (error) {
-          console.log(data);
-          err(new Error('Can\'t parse server response'));
-          return;
-        }
+  if (!options.method)
+    options.method = 'get';
+    
+  if (raw)
+    options.responseType = 'arraybuffer';
 
-        cb({ data, cookies: res.headers['set-cookie'] });
+  return new Promise((resolve, reject) => {
+    axios(options)
+      .then((response) => {
+        const { data, headers } = response;
+          resolve({ data, cookies: headers['set-cookie'] });
+      })
+      .catch((error) => {
+        reject(error);
       });
-    });
-
-    req.on('error', err);
-    req.end(content);
   });
 }
 

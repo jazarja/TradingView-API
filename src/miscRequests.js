@@ -1,5 +1,4 @@
-const os = require('os');
-const https = require('https');
+const axios = require('axios');
 const request = require('./request');
 const FormData = require('./FormData');
 
@@ -8,6 +7,8 @@ const PineIndicator = require('./classes/PineIndicator');
 
 const indicators = ['Recommend.Other', 'Recommend.All', 'Recommend.MA'];
 const builtInIndicList = [];
+
+const USER_AGENT_STRING = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36`;
 
 async function fetchScanData(tickers = [], type = '', columns = []) {
   let { data } = await request({
@@ -369,7 +370,7 @@ module.exports = {
       headers: {
         referer: 'https://www.tradingview.com',
         'Content-Type': `multipart/form-data; boundary=${formData.boundary}`,
-        'User-agent': `${UA} (${os.version()}; ${os.platform()}; ${os.arch()})`,
+        'User-agent': USER_AGENT_STRING,
       },
     }, false, formData.toString());
 
@@ -408,44 +409,43 @@ module.exports = {
    * @returns {Promise<User>} Token
    */
   async getUser(session, signature = '', location = 'https://www.tradingview.com/') {
-    return new Promise((cb, err) => {
-      https.get(location, {
-        headers: { cookie: `sessionid=${session}${signature ? `;sessionid_sign=${signature};` : ''}` },
-      }, (res) => {
-        let rs = '';
-        res.on('data', (d) => { rs += d; });
-        res.on('end', async () => {
-          if (res.headers.location && location !== res.headers.location) {
-            cb(await module.exports.getUser(session, signature, res.headers.location));
-            return;
-          }
-          if (rs.includes('auth_token')) {
-            cb({
-              id: /"id":([0-9]{1,10}),/.exec(rs)[1],
-              username: /"username":"(.*?)"/.exec(rs)[1],
-              firstName: /"first_name":"(.*?)"/.exec(rs)[1],
-              lastName: /"last_name":"(.*?)"/.exec(rs)[1],
-              reputation: parseFloat(/"reputation":(.*?),/.exec(rs)[1] || 0),
-              following: parseFloat(/,"following":([0-9]*?),/.exec(rs)[1] || 0),
-              followers: parseFloat(/,"followers":([0-9]*?),/.exec(rs)[1] || 0),
-              notifications: {
-                following: parseFloat(/"notification_count":\{"following":([0-9]*),/.exec(rs)[1] || 0),
-                user: parseFloat(/"notification_count":\{"following":[0-9]*,"user":([0-9]*)/.exec(rs)[1] || 0),
-              },
-              session,
-              signature,
-              sessionHash: /"session_hash":"(.*?)"/.exec(rs)[1],
-              privateChannel: /"private_channel":"(.*?)"/.exec(rs)[1],
-              authToken: /"auth_token":"(.*?)"/.exec(rs)[1],
-              joinDate: new Date(/"date_joined":"(.*?)"/.exec(rs)[1] || 0),
-            });
-          } else err(new Error('Wrong or expired sessionid/signature'));
-        });
-
-        res.on('error', err);
-      }).end();
+  try {
+    const response = await axios.get(location, {
+      headers: { cookie: `sessionid=${session}${signature ? `;sessionid_sign=${signature};` : ''}` }
     });
-  },
+
+    let rs = response.data;
+    if (response.headers.location && location !== response.headers.location) {
+      return await getUser(session, signature, response.headers.location);
+    }
+
+    if (rs.includes('auth_token')) {
+      return {
+        id: /"id":([0-9]{1,10}),/.exec(rs)[1],
+        username: /"username":"(.*?)"/.exec(rs)[1],
+        firstName: /"first_name":"(.*?)"/.exec(rs)[1],
+        lastName: /"last_name":"(.*?)"/.exec(rs)[1],
+        reputation: parseFloat(/"reputation":(.*?),/.exec(rs)[1] || 0),
+        following: parseFloat(/,"following":([0-9]*?),/.exec(rs)[1] || 0),
+        followers: parseFloat(/,"followers":([0-9]*?),/.exec(rs)[1] || 0),
+        notifications: {
+          following: parseFloat(/"notification_count":\{"following":([0-9]*),/.exec(rs)[1] || 0),
+          user: parseFloat(/"notification_count":\{"following":[0-9]*,"user":([0-9]*)/.exec(rs)[1] || 0),
+        },
+        session,
+        signature,
+        sessionHash: /"session_hash":"(.*?)"/.exec(rs)[1],
+        privateChannel: /"private_channel":"(.*?)"/.exec(rs)[1],
+        authToken: /"auth_token":"(.*?)"/.exec(rs)[1],
+        joinDate: new Date(/"date_joined":"(.*?)"/.exec(rs)[1] || 0),
+      };
+    } else {
+      throw new Error('Wrong or expired sessionid/signature');
+    }
+  } catch (error) {
+    throw error;
+  }
+},
 
   /**
    * Get user's private indicators from a 'sessionid' cookie
@@ -455,44 +455,35 @@ module.exports = {
    * @returns {Promise<SearchIndicatorResult[]>} Search results
    */
   async getPrivateIndicators(session, signature = '') {
-    return new Promise((cb, err) => {
-      https.get('https://pine-facade.tradingview.com/pine-facade/list?filter=saved', {
-        headers: { cookie: `sessionid=${session}${signature ? `;sessionid_sign=${signature};` : ''}` },
-      }, (res) => {
-        let rs = '';
-        res.on('data', (d) => { rs += d; });
-        res.on('end', async () => {
-          try {
-            rs = JSON.parse(rs);
-          } catch (error) {
-            err(new Error('Can\'t parse private indicator list'));
-            return;
-          }
-
-          cb(rs.map((ind) => ({
-            id: ind.scriptIdPart,
-            version: ind.version,
-            name: ind.scriptName,
-            author: {
-              id: -1,
-              username: '@ME@',
-            },
-            image: ind.imageUrl,
-            access: 'private',
-            source: ind.scriptSource,
-            type: (ind.extra && ind.extra.kind) ? ind.extra.kind : 'study',
-            get() {
-              return module.exports.getIndicator(ind.scriptIdPart, ind.version);
-            },
-            getManager() {
-              return new PinePermManager(ind.scriptIdPart);
-            },
-          })));
-        });
-
-        res.on('error', err);
-      }).end();
-    });
+    try {
+      const response = await axios.get('https://pine-facade.tradingview.com/pine-facade/list?filter=saved', {
+        headers: { cookie: `sessionid=${session}${signature ? `;sessionid_sign=${signature};` : ''}` }
+      });
+  
+      let rs = response.data;
+  
+      return rs.map((ind) => ({
+        id: ind.scriptIdPart,
+        version: ind.version,
+        name: ind.scriptName,
+        author: {
+          id: -1,
+          username: '@ME@',
+        },
+        image: ind.imageUrl,
+        access: 'private',
+        source: ind.scriptSource,
+        type: (ind.extra && ind.extra.kind) ? ind.extra.kind : 'study',
+        get() {
+          return module.exports.getIndicator(ind.scriptIdPart, ind.version);
+        },
+        getManager() {
+          return new PinePermManager(ind.scriptIdPart);
+        },
+      }));
+    } catch (error) {
+      throw error;
+    }
   },
 
   /**
