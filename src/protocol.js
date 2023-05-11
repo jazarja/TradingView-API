@@ -17,6 +17,8 @@ module.exports = {
    * @returns {TWPacket[]} TradingView packets
    */
   parseWSPacket(str) {
+    if (typeof str=='object')
+      str = str.toString();
     return str.replace(cleanerRgx, '').split(splitterRgx)
       .map((p) => {
         if (!p) return false;
