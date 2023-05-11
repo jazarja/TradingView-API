@@ -1,4 +1,4 @@
-const WebSocket = require('ws');
+const WebSocket = require('isomorphic-ws');
 
 const misc = require('./miscRequests');
 const protocol = require('./protocol');
